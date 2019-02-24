@@ -18,13 +18,13 @@ class TLDetector(object):
     def __init__(self):
         rospy.init_node('tl_detector')
 
-        self.pose = None
-        self.waypoints = None
-        self.camera_image = None
-        self.lights = []
+        self.pose = None # vehicle position
+        self.waypoints = None # track waypoint buffer
+        self.camera_image = None # buffer for camera images
+        self.lights = [] # buffer for traffic light informations on track
         
-        self.waypoint_tree = None
-        self.waypoints_2d = None
+        self.waypoint_tree = None # space-partitioning data structure for quick comparision
+        self.waypoints_2d = None # to extract only the position information of waypoint segements
 
         sub1 = rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
         sub2 = rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
@@ -59,6 +59,7 @@ class TLDetector(object):
         self.pose = msg
 
     def waypoints_cb(self, waypoints):
+        # fill the buffers for waypoints, helper parameters and the KDTree
         self.waypoints = waypoints
         if not self.waypoints_2d:
             self.waypoints_2d = [[waypoint.pose.pose.position.x, waypoint.pose.pose.position.y] for waypoint in waypoints.waypoints]
@@ -109,6 +110,7 @@ class TLDetector(object):
 
         """
         #TODO implement
+        # get the waypoint coordinates that are closest to [x, y]
         closest_idx = self.waypoint_tree.query([x, y], 1)[1]
         return closest_idx
 
@@ -150,6 +152,7 @@ class TLDetector(object):
             car_wp_idx = self.get_closest_waypoint(self.pose.pose.position.x, self.pose.pose.position.y)
 
             #TODO find the closest visible traffic light (if one exists)
+            # initialize diff as the number of traffic lights on track
             diff = len(self.waypoints.waypoints)
             for i, light in enumerate(self.lights):
                 # get stop line waypoint index

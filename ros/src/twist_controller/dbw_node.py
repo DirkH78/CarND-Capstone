@@ -58,12 +58,12 @@ class DBWNode(object):
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cb)
         rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_enabled_cb)
         
-        self.current_vel = None
-        self.curr_ang_vel = None
-        self.dbw_enabled = 1
-        self.linear_vel = None
-        self.angular_vel = None
-        self.throttle = self.steering = self.brake = 0
+        self.current_vel = None # measured current velocity of vehicle
+        self.curr_ang_vel = None # measured current angular velocity of vehicle
+        self.dbw_enabled = 1 # flag showing the status of the drive by wire system (1: enabled / 0:disabled)
+        self.linear_vel = None # target longitudinal velocity of vehicle
+        self.angular_vel = None # target angular velocity of vehicle
+        self.throttle = self.steering = self.brake = 0 # dbw parameters
         
         self.loop()
 
@@ -71,8 +71,10 @@ class DBWNode(object):
         rate = rospy.Rate(50) # 50Hz
         while not rospy.is_shutdown():
             if not None in (self.current_vel, self.linear_vel, self.angular_vel):
+                # identify set points for dbw system
                 self.throttle, self.brake, self.steering = self.controller.control(self.current_vel, self.dbw_enabled, self.linear_vel, self.angular_vel)
             if self.dbw_enabled:
+                # control the vehicles dbw system with 50 Hz
                 self.publish(self.throttle, self.brake, self.steering)
             rate.sleep()
 

@@ -25,7 +25,7 @@ TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
-MAX_DECEL = .5
+MAX_DECEL = .5 # deceleration parameter for approaching a red traffic light
 
 
 class WaypointUpdater(object):
@@ -42,37 +42,40 @@ class WaypointUpdater(object):
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         # TODO: Add other member variables you need below
-        self.pose = None
-        self.base_waypoints = None
-        self.waypoints_2d = None
-        self.waypoint_tree = None
-        self.stopline_wp_idx = None
+        self.pose = None # vehicle position
+        self.base_waypoints = None # track waypoint buffer
+        self.waypoints_2d = None # to extract only the position information of waypoint segements
+        self.waypoint_tree = None # space-partitioning data structure for quick comparision
+        self.stopline_wp_idx = None # index of the next stopline if traffic light is red
 
         self.loop()
         
     def loop(self):
-        rate = rospy.Rate(10)
+        rate = rospy.Rate(10) # higher rate leads to massive latency
         while not rospy.is_shutdown():
             if self.pose and self.base_waypoints:
                 closest_waypoint_idx = self.get_closest_waypoint_idx()
-                self.publish_waypoints(closest_waypoint_idx)
+                self.publish_waypoints(closest_waypoint_idx) # publish the closest waypoint ahaed of vehicle
             rate.sleep()
             
     def get_closest_waypoint_idx(self):
         x = self.pose.pose.position.x
         y = self.pose.pose.position.y
-        closest_idx = self.waypoint_tree.query([x, y], 1)[1]
+        closest_idx = self.waypoint_tree.query([x, y], 1)[1] # use KDTree to quickly identify index of closest waypoint
         
-        closest_coord = self.waypoints_2d[closest_idx]
-        prev_coord = self.waypoints_2d[closest_idx - 1]
+        closest_coord = self.waypoints_2d[closest_idx] # show the waypoint x,y-coordinates closest to vehicle
+        prev_coord = self.waypoints_2d[closest_idx - 1] # show the waypoint x,y-coordinates one index previous to the closest to vehicle
         
+        # create numpy arrays to be able to use vector algebraic functions
         cl_vect = np.array(closest_coord)
         prev_vect = np.array(prev_coord)
         pos_vect = np.array([x, y])
         
-        val = np.dot(cl_vect - prev_vect, pos_vect - cl_vect)
+        # dot product of two vectors: 1) vector between the two waypoints 2) vector between vehicle and closest wapoint
+        val = np.dot(cl_vect - prev_vect, pos_vect - cl_vect) # the dot product is the product of the Euclidean magnitudes of the two vectors and the cosine of the angle between them. In this case a dot product > 0 means that one vector can be projected onto the other vector and the direction of the projection is alligned with the vector.
         
         if val > 0:
+            # in this case the closest waypoint is behind the car and the following wp needs to be choosen
             closest_idx = (closest_idx + 1) % len(self.waypoints_2d)
         return closest_idx
     
@@ -85,15 +88,17 @@ class WaypointUpdater(object):
         self.final_waypoints_pub.publish(final_lane)
         
     def generate_lane(self):
-        lane = Lane()
+        lane = Lane() # create new lane object
         
         closest_idx = self.get_closest_waypoint_idx()
         farthest_idx = closest_idx + LOOKAHEAD_WPS
-        base_waypoints = self.base_waypoints.waypoints[closest_idx : farthest_idx]
+        base_waypoints = self.base_waypoints.waypoints[closest_idx : farthest_idx] # trajectory waypoints of vehicle
         
         if self.stopline_wp_idx == -1 or (self.stopline_wp_idx >= farthest_idx):
+            # if no red traffic light ahard (-1), just use the initial trajectory
             lane.waypoints = base_waypoints
         else:
+            # if red traffic light ahead, manipulate the trajectory waypoints respectively (decelerate_waypoints)
             lane.waypoints = self.decelerate_waypoints(base_waypoints, closest_idx)
             
         return lane
@@ -106,9 +111,12 @@ class WaypointUpdater(object):
                 p = Waypoint()
                 p.pose = wp.pose
 
-                stop_idx = max(self.stopline_wp_idx - closest_idx - 2, 0) # Two waypoints back from line
+                # use a sqaure root function to generate velocity profile for trajectory waypoints
+                stop_idx = max(self.stopline_wp_idx - closest_idx - 2, 0) # Two waypoints back from line. Takes the vehicle length into account
                 dist = self.distance(waypoints, i, stop_idx)
                 vel = math.sqrt(2 * MAX_DECEL * dist)
+                
+                # perform full stop, when low target velictity is reached
                 if vel < 1.:
                     vel = 0.
 
@@ -123,6 +131,7 @@ class WaypointUpdater(object):
 
     def waypoints_cb(self, waypoints):
         # TODO: Implement
+        # fill the buffers for waypoints, helper parameters and the KDTree
         self.base_waypoints = waypoints
         if not self.waypoints_2d:
             self.waypoints_2d = [[waypoint.pose.pose.position.x, waypoint.pose.pose.position.y] for waypoint in waypoints.waypoints]
